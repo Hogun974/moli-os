@@ -18,6 +18,7 @@
   "assistant.recap.boitier": "boîtier",
   "assistant.recap.appli": "appli",
   "assistant.recap.echec": "échec",
+  "assistant.recap.interrompu": "interrompu",
   "assistant.recap.fin": "(conversation close)",
   "assistant.recap.more": "et {n} échanges plus tôt (voir le tableau de bord)",
   "assistant.power.total": "Électricité en direct : {watts} pour toute la maison (compteur général, ce n'est pas un appareil)",

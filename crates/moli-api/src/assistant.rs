@@ -40,6 +40,24 @@ pub(crate) async fn turn(
     }
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct Stop {
+    /// The `id` the dashboard gave its turn.
+    id: String,
+}
+
+/// `POST /api/assistant/stop`: stops the dashboard's turn of that `id`.
+/// `{stopped}` says whether one was running.
+pub(crate) async fn stop(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::Json(stop): axum::Json<Stop>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    axum::Json(json!({ "stopped": moli.stop(&stop.id) })).into_response()
+}
+
 pub(crate) async fn listen(
     Extension(Moli(moli)): Extension<Moli>,
     headers: HeaderMap,

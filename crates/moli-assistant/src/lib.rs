@@ -43,7 +43,7 @@ pub use voice::{Heard, Speech, SpeechStream, Spoken};
 #[cfg(test)]
 mod before;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -53,6 +53,7 @@ use moli_core::{DeviceId, InstanceId, Origin, PointId, Value};
 use moli_runtime::{CommandError, Hub};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::house::{Layout, name_of};
 use crate::llm::Endpoint;
@@ -254,6 +255,10 @@ struct Inner {
     weather_refreshed: Mutex<Option<Instant>>,
     /// Orders and reminders for later (in memory: a restart forgets them).
     planned: std::sync::Mutex<Vec<house_tools::Planned>>,
+    /// The dashboard's turns being thought out, by the id the dashboard
+    /// gave them, so the person who asked can stop theirs (and only theirs).
+    /// Each turn adds its entry once admitted and removes it itself.
+    stoppable: Mutex<HashMap<String, CancellationToken>>,
     /// A Home Assistant import is running.
     importing: std::sync::atomic::AtomicBool,
     /// SHA-256 of the HA automations translated since start: not paid for
@@ -292,6 +297,12 @@ pub struct Turn {
     /// The question was spoken and the answer will be heard.
     #[serde(default)]
     pub spoken: bool,
+    /// Names the turn so the person who asked can stop it
+    /// (`POST /api/assistant/stop`): 1 to 64 letters, digits, `-` or `_`.
+    /// The dashboard sends one; a satellite's turn is never stopped from
+    /// a screen.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -319,6 +330,10 @@ pub struct Reply {
     /// The person asked to end the spoken conversation (`end_conversation`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub end: bool,
+    /// The person stopped the turn before it answered: no words, but the
+    /// orders already given are in `actions`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
     /// The tools called, for the history.
     #[serde(skip)]
     pub tools: Vec<String>,
@@ -420,6 +435,7 @@ impl Assistant {
             providers,
             tz,
             running: tokio::sync::Semaphore::new(2),
+            stoppable: Mutex::new(HashMap::new()),
             recent: Mutex::new(VecDeque::new()),
             voice_running: tokio::sync::Semaphore::new(3),
             voice_recent: Mutex::new(VecDeque::new()),
@@ -664,6 +680,88 @@ impl Assistant {
         Ok(speech)
     }
 
+    /// Stops the dashboard's turn named `id`. Says whether there was one:
+    /// « stop » pressed on nothing should be told so. Only the wait for the
+    /// model is cut: a tool, an order or a draft already started goes to
+    /// its end, and what the turn already did stays done.
+    #[must_use]
+    pub fn stop(&self, id: &str) -> bool {
+        let token = self
+            .0
+            .stoppable
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned();
+        token.inspect(CancellationToken::cancel).is_some()
+    }
+
+    /// Admits a turn, THEN lists it as stoppable: in that order, a turn
+    /// refused as busy never shows up in the table.
+    fn admit_turn(
+        &self,
+        id: Option<&str>,
+        stop: &CancellationToken,
+    ) -> Result<(tokio::sync::SemaphorePermit<'_>, Option<Stoppable<'_>>), AssistantError> {
+        let permit = self.admit()?;
+        Ok((permit, self.stoppable(id, stop)?))
+    }
+
+    /// Lists an admitted turn under its `id` for as long as it runs. A turn
+    /// refused (busy, invalid) never shows up, and an id in use is refused:
+    /// one entry, one owner.
+    fn stoppable(
+        &self,
+        id: Option<&str>,
+        stop: &CancellationToken,
+    ) -> Result<Option<Stoppable<'_>>, AssistantError> {
+        let Some(id) = id else {
+            return Ok(None);
+        };
+        if id.is_empty()
+            || id.len() > 64
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(AssistantError::Invalid(
+                "turn id: 1 to 64 letters, digits, - or _".into(),
+            ));
+        }
+        let mut table = self
+            .0
+            .stoppable
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if table.contains_key(id) {
+            return Err(AssistantError::Invalid("turn id already in use".into()));
+        }
+        table.insert(id.to_owned(), stop.clone());
+        Ok(Some(Stoppable {
+            table: &self.0.stoppable,
+            id: id.to_owned(),
+        }))
+    }
+
+    /// The model's answer, or `None` when the person stopped the turn while
+    /// it was awaited. Only this wait is cut: what the answer asks for runs
+    /// outside it, and always to its end.
+    pub(crate) async fn ask_model(
+        &self,
+        key: Option<&str>,
+        body: &Json,
+        stop: &CancellationToken,
+    ) -> Result<Option<Json>, AssistantError> {
+        tokio::select! {
+            // Stopped already: not even asked (nor paid for).
+            biased;
+            () = stop.cancelled() => Ok(None),
+            answer = self.0.endpoint.chat(key, body) => answer
+                .map(Some)
+                .map_err(|e| AssistantError::Upstream(e.to_string())),
+        }
+    }
+
     /// One turn of the conversation: the model reads the house, may act and
     /// pick cards, then answers.
     /// One turn, kept in the history (question, answer, orders, time taken).
@@ -676,7 +774,8 @@ impl Assistant {
             .map(|m| m.content.clone());
         let surface = turn.surface.clone().unwrap_or_default();
         let spoken = turn.spoken;
-        let result = self.converse(turn).await;
+        let stop = CancellationToken::new();
+        let result = self.converse(turn, &stop).await;
         if let Some(question) = question {
             let heard = self.take_heard();
             let c = &self.0.config;
@@ -686,7 +785,11 @@ impl Assistant {
                 .map_or(0.0, |h| pricing::hear(&c.transcribe_model, h.seconds));
             let (kind, reply, tools, orders, cost) = match &result {
                 Ok(r) => (
-                    exchanges::Kind::Turn,
+                    if r.interrupted {
+                        exchanges::Kind::Interrupted
+                    } else {
+                        exchanges::Kind::Turn
+                    },
                     r.reply.clone(),
                     r.tools.clone(),
                     r.actions
@@ -920,14 +1023,18 @@ impl Assistant {
         }
     }
 
-    async fn converse(&self, turn: Turn) -> Result<Reply, AssistantError> {
+    async fn converse(
+        &self,
+        turn: Turn,
+        stop: &CancellationToken,
+    ) -> Result<Reply, AssistantError> {
         if turn.messages.last().is_none_or(|m| m.role != Role::User) {
             return Err(AssistantError::Invalid(
                 "the last message must be the user's".into(),
             ));
         }
         let key = self.key()?;
-        let _permit = self.admit()?;
+        let _admitted = self.admit_turn(turn.id.as_deref(), stop)?;
         let layout = Layout::load(self.0.layout_path.as_deref()).await;
         let page = turn.surface.as_deref() == Some("page");
         let question = turn
@@ -937,7 +1044,9 @@ impl Assistant {
             .unwrap_or_default();
 
         if self.speaks_contract() {
-            return self.converse_house(&turn, &layout, key.as_deref()).await;
+            return self
+                .converse_house(&turn, &layout, key.as_deref(), stop)
+                .await;
         }
 
         let power = self.power_now().await;
@@ -984,12 +1093,9 @@ impl Assistant {
             if step + 1 == MAX_STEPS {
                 body["tool_choice"] = json!("none");
             }
-            let answer = self
-                .0
-                .endpoint
-                .chat(key.as_deref(), &body)
-                .await
-                .map_err(|e| AssistantError::Upstream(e.to_string()))?;
+            let Some(answer) = self.ask_model(key.as_deref(), &body, stop).await? else {
+                return Ok(self.interrupted(run));
+            };
             run.usage.steps = step + 1;
             run.usage.prompt_tokens += answer["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
             run.usage.completion_tokens +=
@@ -1087,6 +1193,28 @@ impl Assistant {
         (carried_out && (!said.is_empty() || run.end)).then_some(said)
     }
 
+    /// What a stopped turn leaves: no words, but the orders already given,
+    /// and the steps already taken, whose cost stays counted.
+    fn interrupted(&self, run: Run) -> Reply {
+        tracing::info!(
+            steps = run.usage.steps,
+            actions = run.actions.len(),
+            "assistant turn stopped"
+        );
+        Reply {
+            reply: String::new(),
+            cards: Vec::new(),
+            actions: run.actions,
+            model: self.0.config.model.clone(),
+            usage: run.usage,
+            end: false,
+            interrupted: true,
+            tools: run.tools,
+            search_cost: run.search_cost,
+            draft_cost: run.draft_cost,
+        }
+    }
+
     fn finish(&self, text: &str, mut run: Run, layout: &Layout, question: &str) -> Reply {
         // The model sometimes answers in words only: the screen still shows
         // what the question was obviously about.
@@ -1121,6 +1249,7 @@ impl Assistant {
             model: self.0.config.model.clone(),
             usage: run.usage,
             end: run.end,
+            interrupted: false,
             tools: run.tools,
             search_cost: run.search_cost,
             draft_cost: run.draft_cost,
@@ -1510,6 +1639,22 @@ struct Run {
     drafts: usize,
     /// What the drafts cost (dollars).
     draft_cost: f64,
+}
+
+/// A stoppable turn's entry, removed by the turn itself when it ends,
+/// however it ends.
+struct Stoppable<'a> {
+    table: &'a Mutex<HashMap<String, CancellationToken>>,
+    id: String,
+}
+
+impl Drop for Stoppable<'_> {
+    fn drop(&mut self) {
+        self.table
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+    }
 }
 
 /// A paid tool called once too often in a turn: the model is told, the turn
@@ -2404,6 +2549,108 @@ mod tests {
         let hub = lamp_hub().await;
         let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
         Assistant::new(hub, None, None, None, config).unwrap()
+    }
+
+    /// A provider that takes every question and never answers.
+    async fn silent_provider() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        url
+    }
+
+    /// A question from the dashboard, its turn named `id`.
+    fn asked_as(id: &str, question: &str) -> Turn {
+        serde_json::from_value(json!({
+            "id": id,
+            "surface": "bubble",
+            "messages": [{ "role": "user", "content": question }],
+        }))
+        .unwrap()
+    }
+
+    /// Whether a turn runs under `id`, without stopping it.
+    fn listed(moli: &Assistant, id: &str) -> bool {
+        moli.0.stoppable.lock().unwrap().contains_key(id)
+    }
+
+    async fn until_listed(moli: &Assistant, id: &str) {
+        for _ in 0..400 {
+            if listed(moli, id) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("turn {id} never became stoppable");
+    }
+
+    #[tokio::test]
+    async fn a_turn_is_stopped_by_its_own_id_only() {
+        let config: Config =
+            serde_json::from_value(json!({ "base_url": silent_provider().await })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let ask = |id: &'static str| {
+            let moli = moli.clone();
+            tokio::spawn(async move { moli.turn(asked_as(id, "allume la lampe")).await })
+        };
+        let (a, b) = (ask("a"), ask("b"));
+        until_listed(&moli, "a").await;
+        until_listed(&moli, "b").await;
+        assert!(!moli.stop("c"), "nothing runs under that id");
+
+        assert!(moli.stop("a"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), a)
+            .await
+            .expect("a stopped turn ends at once")
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
+        assert!(reply.reply.is_empty());
+        assert!(!listed(&moli, "a"), "the turn took its entry with it");
+        assert!(!moli.stop("a"));
+
+        // The other turn was not touched: still waiting, still stoppable.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!b.is_finished());
+        assert!(moli.stop("b"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), b)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
+        assert!(moli.0.stoppable.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_turn_id_is_checked_and_never_shared() {
+        let config: Config =
+            serde_json::from_value(json!({ "base_url": silent_provider().await })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let err = moli.turn(asked_as("a b", "?")).await.unwrap_err();
+        assert!(matches!(err, AssistantError::Invalid(_)), "{err}");
+
+        let first = {
+            let moli = moli.clone();
+            tokio::spawn(async move { moli.turn(asked_as("x", "?")).await })
+        };
+        until_listed(&moli, "x").await;
+        let err = moli.turn(asked_as("x", "?")).await.unwrap_err();
+        assert!(matches!(err, AssistantError::Invalid(_)), "{err}");
+        // Refused, the second turn did not take the first one's entry away.
+        assert!(listed(&moli, "x"));
+        assert!(moli.stop("x"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
     }
 
     fn spoken(question: &str) -> Turn {

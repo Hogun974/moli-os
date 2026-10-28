@@ -61,6 +61,10 @@ export function reset() {
   moli.focus = null;
 }
 
+/** The turn asked from this screen and not yet answered: « stop » names it,
+ *  so it never stops somebody else's. */
+let current = null;
+
 /** Asks Moli. `surface`: 'bubble' or 'page'. `spoken`: the answer will be
  *  heard (read aloud here unless `silent`: the conversation speaks it).
  *  Resolves to `{ reply, actions }`, or null on failure. */
@@ -69,11 +73,14 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
   if (!content || moli.busy) return null;
   moli.messages.push({ role: 'user', content, spoken });
   moli.busy = true;
+  // Not crypto.randomUUID: it only exists over HTTPS, and a house is often plain HTTP.
+  current = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   try {
     const res = await fetch('/api/assistant', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        id: current,
         surface,
         spoken,
         messages: moli.messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content })),
@@ -81,6 +88,11 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(humanError(res.status, body.error));
+    // Stopped: nothing to say. The question left unanswered goes, no empty bubble.
+    if (body.interrupted) {
+      moli.messages.pop();
+      return null;
+    }
     moli.messages.push({ role: 'assistant', content: body.reply, cards: body.cards ?? [], actions: body.actions ?? [] });
     moli.focus = moli.messages.length - 1;
     if (spoken && !silent) speak(body.reply);
@@ -90,6 +102,23 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
     return null;
   } finally {
     moli.busy = false;
+    current = null;
+  }
+}
+
+/** Stops the turn asked from this screen. True if one was stopped. */
+export async function arreter() {
+  if (!current) return false;
+  try {
+    const res = await fetch('/api/assistant/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: current }),
+    });
+    const body = await res.json().catch(() => ({}));
+    return body.stopped === true;
+  } catch {
+    return false;
   }
 }
 

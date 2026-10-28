@@ -114,6 +114,7 @@ impl VoiceBrain for Assistant {
                 messages,
                 surface: Some("satellite".into()),
                 spoken: true,
+                id: None,
             };
             self.turn(turn)
                 .await

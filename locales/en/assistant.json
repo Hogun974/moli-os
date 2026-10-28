@@ -18,6 +18,7 @@
   "assistant.recap.boitier": "satellite",
   "assistant.recap.appli": "app",
   "assistant.recap.echec": "failed",
+  "assistant.recap.interrompu": "stopped",
   "assistant.recap.fin": "(conversation closed)",
   "assistant.recap.more": "and {n} earlier exchanges (see the dashboard)",
   "assistant.power.total": "Live electricity: {watts} for the whole home (main meter, not an appliance)",

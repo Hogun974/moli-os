@@ -85,6 +85,7 @@ impl Assistant {
         turn: &Turn,
         layout: &Layout,
         key: Option<&str>,
+        stop: &tokio_util::sync::CancellationToken,
     ) -> Result<Reply, AssistantError> {
         let question = turn
             .messages
@@ -112,12 +113,9 @@ impl Assistant {
             "temperature": 0,
             "max_tokens": 200,
         });
-        let answer = self
-            .0
-            .endpoint
-            .chat(key, &body)
-            .await
-            .map_err(|e| AssistantError::Upstream(e.to_string()))?;
+        let Some(answer) = self.ask_model(key, &body, stop).await? else {
+            return Ok(self.interrupted(Run::default()));
+        };
         let mut run = Run::default();
         run.usage.steps = 1;
         run.usage.prompt_tokens = answer["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
