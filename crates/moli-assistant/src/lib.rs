@@ -206,6 +206,13 @@ const MAX_STEPS: usize = 6;
 /// Messages of the conversation sent back (the model has no memory).
 const MAX_MESSAGES: usize = 14;
 const MAX_MESSAGE_CHARS: usize = 2_000;
+/// What the model may write in one step when it only has to talk: a short
+/// answer, a call or two.
+const WORDS: usize = 700;
+/// The tools that take the person's request whole (`automation` hands it to
+/// the builder model): offered one, the model may have to write the request
+/// out again, inside the call's JSON.
+const COPIES_THE_REQUEST: &[&str] = &["automation"];
 /// Turns per window, all clients together: a runaway page cannot run up a bill.
 const MAX_TURNS: usize = 60;
 const TURN_WINDOW: Duration = Duration::from_secs(10 * 60);
@@ -979,7 +986,7 @@ impl Assistant {
                 if takes_temperature(&self.0.config.model) {
                     body["temperature"] = json!(0.3);
                 }
-                body["max_tokens"] = json!(700);
+                body["max_tokens"] = json!(output_room(&offered, &question));
             }
             if step + 1 == MAX_STEPS {
                 body["tool_choice"] = json!("none");
@@ -1531,6 +1538,27 @@ fn once(text: &str) -> String {
         }
     }
     t.to_owned()
+}
+
+/// Room for the model's output in one step: its own words, and, when an
+/// offered tool copies the request, the request itself (as many tokens as
+/// characters: French and its JSON escaping fit). Without it a long request
+/// is cut mid-call, the call is lost and the turn ends with nothing. It
+/// depends on the tools offered, not on who answers: any tool that carries a
+/// long text meets the same limit.
+fn output_room(offered: &Json, question: &str) -> usize {
+    let copies = offered.as_array().is_some_and(|list| {
+        list.iter().any(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .is_some_and(|name| COPIES_THE_REQUEST.contains(&name))
+        })
+    });
+    if copies {
+        WORDS + question.chars().count().min(MAX_MESSAGE_CHARS)
+    } else {
+        WORDS
+    }
 }
 
 /// The conversation sent to the model: the last `MAX_MESSAGES` at most, each
@@ -2582,6 +2610,52 @@ mod tests {
         assert!(zone.contains("Travail"), "{zone}");
         drop(moli);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_output_room_follows_the_tools_offered() {
+        let long = "allume la lampe du salon quand il fait nuit, ".repeat(40);
+        assert!(long.chars().count() > 1_500);
+        // `automation` is offered: the request may have to be written out again.
+        assert_eq!(output_room(&tools(), "allume"), WORDS + 6);
+        assert_eq!(output_room(&tools(), &long), WORDS + long.chars().count());
+        let huge = "x".repeat(10 * MAX_MESSAGE_CHARS);
+        assert_eq!(output_room(&tools(), &huge), WORDS + MAX_MESSAGE_CHARS);
+        // Nothing offered copies it: the words alone.
+        let mut without = tools();
+        without
+            .as_array_mut()
+            .unwrap()
+            .retain(|t| t["function"]["name"] != "automation");
+        assert_eq!(output_room(&without, &long), WORDS);
+    }
+
+    /// The ceiling the provider is sent: room for a long request, measured on
+    /// the request itself, not a constant that a long one outgrows.
+    #[tokio::test]
+    async fn a_long_request_leaves_room_to_be_written_out() {
+        let answer =
+            json!({ "choices": [{ "message": { "role": "assistant", "content": "D'accord." } }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5 } })
+            .to_string();
+        let (url, asked) = crate::llm::tests::fake_provider(vec![answer]).await;
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let long =
+            "quand quelqu'un rentre le soir et qu'il fait nuit, allume l'entrée puis le salon ; "
+                .repeat(20);
+        let turn: Turn = serde_json::from_value(json!({
+            "messages": [{ "role": "user", "content": long }],
+        }))
+        .unwrap();
+        moli.turn(turn).await.unwrap();
+        let asked = asked.lock().unwrap().clone();
+        let body: Json = serde_json::from_str(asked[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            body["max_tokens"],
+            json!(WORDS + long.chars().count().min(MAX_MESSAGE_CHARS))
+        );
+        assert!(body["max_tokens"].as_u64().unwrap() > 1_500);
     }
 
     /// Whatever the model asks in a turn, two web searches and one draft at
