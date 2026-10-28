@@ -79,6 +79,11 @@ qui est au bout du fil (`Caller`) :
 | `access` | requête venue par le tunnel (en-têtes `cf-ray` / `cf-connecting-ip` **depuis la machine elle-même**) **et** assertion `Cf-Access-Jwt-Assertion` valide : signature RS256 vérifiée contre les clés publiques de l'équipe (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, rafraîchies au plus une fois par minute, gardées si Cloudflare est injoignable), audience = l'application, émetteur = l'équipe, non expirée (60 s de tolérance), e-mail présent | `access:<e-mail>` |
 | `outside` | tout le reste : tunnel sans assertion valide, adresse publique, appareil du réseau qui imite Cloudflare. **Refusé (403) sur toutes les routes.** | `cf:<ip>` ou l'adresse réelle |
 
+Un appareil relié au réseau de la maison par un VPN (WireGuard, par exemple) arrive avec
+une adresse privée : c'est un appelant `lan`, du foyer, sans Cloudflare ni aucun tiers.
+C'est le cas, par exemple, d'un téléphone hors de la maison. Donner l'accès au VPN,
+c'est donc donner l'accès du foyer.
+
 Le tunnel se termine sur la machine elle-même : sans assertion valide, une requête venue
 par Cloudflare est une **inconnue**, jamais `local` ni `cli`. Sans `[server.access]`
 dans `moli.toml`, personne n'est reconnu par Cloudflare. Les en-têtes de Cloudflare ne
