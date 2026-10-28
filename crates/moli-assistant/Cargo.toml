@@ -13,6 +13,7 @@ moli-audio.workspace = true
 moli-core.workspace = true
 moli-runtime.workspace = true
 moli-history.workspace = true
+moli-hermes.workspace = true
 moli-energy.workspace = true
 moli-net.workspace = true
 moli-automation.workspace = true

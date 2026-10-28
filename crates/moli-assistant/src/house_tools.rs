@@ -1003,6 +1003,7 @@ impl Assistant {
         let reminder = async move {
             tokio::time::sleep_until(due).await;
             hub.notice(moli_core::Notice {
+                to: None,
                 title: Some(moli_i18n::tr!("assistant.house.reminder_title")),
                 message: said.clone(),
                 from: Some("Moli".into()),

@@ -98,7 +98,12 @@ impl VoiceBrain for Assistant {
         })
     }
 
-    fn answer(&self, conversation: Vec<Said>) -> BoxFuture<'_, Result<Answer, String>> {
+    fn answer(
+        &self,
+        satellite: &moli_core::DeviceId,
+        conversation: Vec<Said>,
+    ) -> BoxFuture<'_, Result<Answer, String>> {
+        let asker = format!("satellite:{satellite}");
         Box::pin(async move {
             let messages = conversation
                 .into_iter()
@@ -115,7 +120,7 @@ impl VoiceBrain for Assistant {
                 surface: Some("satellite".into()),
                 spoken: true,
                 id: None,
-                asker: Some("satellite".into()),
+                asker: Some(asker),
             };
             self.turn(turn)
                 .await

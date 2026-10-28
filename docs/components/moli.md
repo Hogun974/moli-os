@@ -107,7 +107,8 @@ numérotés `d1…dN` et leurs points) et les 25 outils du contrat (`tools/model
   commandé ; ouvrir une serrure, une porte de garage ou un portail attend toujours la validation d'une
   personne (garde du hub), quelle que soit la pièce ; fermer passe (règle détaillée dans `SECURITY.md`).
 - **Hors du cadre de la maison** (une blague, une explication), l'outil `delegate` répond « pas encore
-  disponible » : rien ne quitte la maison tant que la délégation (#17) n'a pas de forme décidée.
+  disponible » tant qu'aucun agent Hermes n'est configuré ; avec lui, la question lui est confiée,
+  une seule par tour (voir « Confier une demande longue », plus bas).
 - **Configuration proposée, puis confirmée par une personne.** `rename_device`, `move_device`,
   `set_device_enabled`, `rename_room`, `add_person` et `set_home_location` ne changent rien : Moli
   vérifie la demande, garde une **proposition** (10 minutes, en mémoire) et l'écrit sous sa réponse
@@ -315,3 +316,49 @@ vérifier la lecture sur le boîtier, après les tests de protocole et de format
 
 Bulle sur toutes les pages (réponse courte, 2 à 4 cartes) et page Moli (l'écran se compose à
 droite, chaque réponse « revoyable »). Voir [dashboard.md](dashboard.md).
+
+## Confier une demande longue à un agent de la maison (Hermes)
+
+Une recherche fouillée, une organisation, une rédaction : Moli peut les confier à un agent
+**Hermes** qui tourne à la maison, puis annoncer sa réponse quand elle arrive. Désactivé tant
+que `[assistant.hermes]` n'est pas écrit.
+
+```toml
+[assistant.hermes]
+url = "http://127.0.0.1:8642"      # chez soi seulement : boucle locale, adresse privée, nom local
+model = "…"                        # facultatif : le modèle d'une demande ordinaire
+heavy_model = "…"                  # facultatif : celui d'une demande jugée lourde
+```
+
+Le jeton de l'agent va dans le coffre, par un tube, comme la clé du modèle :
+`read -rs V; printf %s "$V" | moli-os secrets set assistant hermes_token; unset V`.
+Sans lui, Moli démarre sans l'agent.
+
+Les règles, qui ne se règlent pas :
+
+- **L'agent reste à la maison.** Une `url` qui n'est pas chez soi (même règle que les
+  fournisseurs : boucle locale, adresse privée, `localhost`, nom sans point, `.local`, `.lan`)
+  fait échouer `check-config` ; au démarrage, Moli démarre sans l'agent plutôt que pas du tout.
+  L'adresse est lue une seule fois, par ce qui s'y connecte, et une `url` avec `#`, `?` ou
+  des identifiants (`user@`) est refusée : deux lectures n'y verraient pas le même hôte.
+- **Seule la demande sort** : ni la conversation, ni la mémoire, ni une image, ni l'état de la
+  maison. Ce que l'agent répond est une information : rendue au modèle tronquée et marquée
+  comme telle, et dès qu'elle a été lue, plus aucun outil qui agit sur la maison ou qui sort
+  (`web_search`) n'est offert ni exécuté dans ce tour, même si le modèle le nomme. Son statut
+  n'arrive au modèle que comme un mot d'une liste fermée (`started`, `running`, `completed`,
+  `failed`, `stopped`, sinon `unknown`), et l'identifiant de sa tâche est filtré et borné
+  (64 caractères). Une seule tâche confiée par tour, pour le modèle maison aussi.
+- **Le modèle lourd est nommé ici**, jamais choisi par le modèle de la conversation : il peut
+  seulement dire « cette demande est lourde ».
+- **Une session neuve à chaque demande** : rien ne passe d'une demande à l'autre, et Moli le
+  dit si on lui demande de « reprendre ».
+- **Chacun sa demande** : Moli retient la dernière tâche confiée **par personne** (la personne
+  quand la maison la connaît, sinon l'appareil qui demande ; chaque boîtier vocal à part). « Où en est ma demande ? »,
+  « précise-lui… », « arrête-la » ne visent qu'elle ; aucun identifiant ne passe par le modèle.
+- **Pas de code** : l'agent ne modifie ni modules ni configuration.
+
+Moli suit une tâche confiée en redemandant toutes les 20 s (30 min au plus) et, quand elle se
+termine, en rend la réponse à qui l'a demandée, une fois : le boîtier vocal qui a parlé la dit
+(s'il a un point `say`), le tableau de bord de la personne qui a demandé l'affiche, personne
+d'autre ne la voit. Un redémarrage perd ce suivi : la réponse se
+demande alors. Le modèle maison (`delegate` du contrat) passe par le même chemin.

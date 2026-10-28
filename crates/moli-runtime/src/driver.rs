@@ -304,6 +304,7 @@ impl MediaPublisher {
     /// background did not happen (the command itself already answered).
     pub fn tell(&self, from: &str, message: String) {
         self.0.notice(moli_core::Notice {
+            to: None,
             title: None,
             message,
             from: Some(from.to_owned()),

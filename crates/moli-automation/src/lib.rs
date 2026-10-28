@@ -509,6 +509,7 @@ impl Automations {
     /// person approved.
     fn tell(&self, a: &Automation, title: String, message: String) {
         self.0.hub.notice(Notice {
+            to: None,
             title: Some(title),
             message,
             from: Some(a.name.clone()),

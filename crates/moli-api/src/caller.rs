@@ -142,6 +142,14 @@ impl Caller {
         self.via == Via::Loopback
     }
 
+    /// Who asks, for what is kept per person: the person when the house
+    /// knows them (`person:<id>`), else this caller's own key.
+    pub(crate) fn asker(&self) -> String {
+        self.person
+            .as_ref()
+            .map_or_else(|| self.key.clone(), |p| format!("person:{}", p.id))
+    }
+
     /// For the journal: who clicked.
     pub(crate) fn describe(&self) -> String {
         if let Some(p) = &self.person {

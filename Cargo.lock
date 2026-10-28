@@ -1144,6 +1144,7 @@ dependencies = [
  "moli-automation",
  "moli-core",
  "moli-energy",
+ "moli-hermes",
  "moli-history",
  "moli-i18n",
  "moli-net",
@@ -1317,6 +1318,19 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "moli-hermes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-net",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

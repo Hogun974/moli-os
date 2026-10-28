@@ -24,7 +24,11 @@ impl VoiceBrain for Brain {
         Box::pin(async { panic!("no microphone or model in this playback test") })
     }
 
-    fn answer(&self, _: Vec<Said>) -> BoxFuture<'_, Result<Answer, String>> {
+    fn answer(
+        &self,
+        _: &moli_core::DeviceId,
+        _: Vec<Said>,
+    ) -> BoxFuture<'_, Result<Answer, String>> {
         Box::pin(async { panic!("the answer is already known") })
     }
 
@@ -66,6 +70,7 @@ impl Driver for Playback {
             let (mut voice, _) = Voice::new(
                 Duration::from_secs(8),
                 Some("http://media.example.test".to_owned()),
+                moli_core::DeviceId::from("esphome:aabbccddeeff"),
             );
             let id = ctx.device_id("aabbccddeeff");
             if self.answer {

@@ -343,6 +343,9 @@ impl Providers {
 impl Config {
     /// Validates `[assistant]` (what `moli-os check-config` runs).
     pub fn check(&self) -> anyhow::Result<()> {
+        if let Some(hermes) = &self.hermes {
+            crate::hermes_at_home(hermes)?;
+        }
         let (_, providers) = self.clone().resolved()?;
         for p in &providers.list {
             if let Some(declared) = &p.refused_contract {

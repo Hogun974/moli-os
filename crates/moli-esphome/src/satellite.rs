@@ -76,6 +76,8 @@ impl Run {
 /// The voice of one satellite.
 #[derive(Debug)]
 pub(crate) struct Voice {
+    /// The satellite this voice is: who asks, for the assistant.
+    device: DeviceId,
     window: Duration,
     media_base: Option<String>,
     run: Option<Run>,
@@ -98,9 +100,14 @@ pub(crate) type Thoughts = mpsc::Receiver<(u64, Thought)>;
 type Sent = anyhow::Result<()>;
 
 impl Voice {
-    pub(crate) fn new(window: Duration, media_base: Option<String>) -> (Self, Thoughts) {
+    pub(crate) fn new(
+        window: Duration,
+        media_base: Option<String>,
+        device: DeviceId,
+    ) -> (Self, Thoughts) {
         let (thoughts_tx, thoughts) = mpsc::channel(8);
         let voice = Self {
+            device,
             window,
             media_base: media_base.map(|b| b.trim_end_matches('/').to_owned()),
             run: None,
@@ -231,6 +238,7 @@ impl Voice {
         let generation = self.generation;
         let conversation = self.conversation.clone();
         let tx = self.thoughts_tx.clone();
+        let device = self.device.clone();
         tokio::spawn(async move {
             let started = Instant::now();
             let text = match brain.hear(wav).await {
@@ -250,7 +258,7 @@ impl Voice {
                 who: Speaker::Person,
                 text,
             });
-            let thought = match brain.answer(lines).await {
+            let thought = match brain.answer(&device, lines).await {
                 Ok(answer) => Thought::Answered(answer),
                 Err(e) => Thought::Failed(e),
             };

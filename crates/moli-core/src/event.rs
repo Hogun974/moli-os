@@ -59,6 +59,10 @@ pub struct Notice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     pub ts: u64,
+    /// For whoever asked only (`person:<id>`, or the caller that asked),
+    /// not the whole house: the answer to one person's request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
 }
 
 /// An order an agent (or script) gave that only a human may release.

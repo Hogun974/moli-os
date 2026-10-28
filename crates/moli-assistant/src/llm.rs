@@ -68,27 +68,7 @@ impl Endpoint {
     /// `localhost`, a bare name (a container, a machine of the LAN) or a
     /// `.local` / `.lan` name. The address says it, not the lack of TLS.
     pub(crate) fn at_home(&self) -> bool {
-        let host = self.host.as_str();
-        // An IPv6 literal keeps its brackets in the parsed host.
-        let host = host
-            .strip_prefix('[')
-            .and_then(|h| h.strip_suffix(']'))
-            .unwrap_or(host);
-        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-            return match ip {
-                std::net::IpAddr::V4(v4) => {
-                    v4.is_loopback() || v4.is_private() || v4.is_link_local()
-                }
-                std::net::IpAddr::V6(v6) => {
-                    let first = v6.segments()[0];
-                    v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
-                }
-            };
-        }
-        let host = host.to_ascii_lowercase();
-        host == "localhost"
-            || !host.contains('.')
-            || matches!(host.rsplit_once('.'), Some((_, "local" | "lan")))
+        host_at_home(&self.host)
     }
 
     fn request(
@@ -360,6 +340,29 @@ fn speech_body(
         body["speed"] = serde_json::json!(speed);
     }
     body.to_string().into_bytes()
+}
+
+/// Whether `host` is at home (see [`Endpoint::at_home`]): the same rule for
+/// every address Moli judges, whoever read it.
+pub(crate) fn host_at_home(host: &str) -> bool {
+    // An IPv6 literal keeps its brackets in the parsed host.
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => {
+                let first = v6.segments()[0];
+                v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+            }
+        };
+    }
+    let host = host.to_ascii_lowercase();
+    host == "localhost"
+        || !host.contains('.')
+        || matches!(host.rsplit_once('.'), Some((_, "local" | "lan")))
 }
 
 #[cfg(test)]

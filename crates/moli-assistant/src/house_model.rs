@@ -114,13 +114,13 @@ impl Assistant {
             "messages": messages,
             "tools": tools,
             "temperature": 0,
-            "max_tokens": 200,
+            "max_tokens": self.house_room(&question),
         });
         let Some(answer) = self.ask_model(key, &body, stop).await? else {
             return Ok(self.interrupted(Run::default()));
         };
         let mut run = Run {
-            asker: turn.asker.clone(),
+            asker: turn.asker.clone().unwrap_or_default(),
             satellite: turn.surface.as_deref() == Some("satellite"),
             ..Run::default()
         };
@@ -270,7 +270,7 @@ impl Assistant {
             "schedule" => self.schedule(point_of(&args["point"]), &args),
             "remind" => self.remind(&args),
             "set_home_location" => self.propose_location(&args, question, spoken, run).await,
-            "delegate" => Self::delegate(),
+            "delegate" => self.delegate_question(&args, run).await,
             "undo" => self.propose_undo(spoken, run),
             "refresh_weather" => self.refresh_weather().await,
             "request_driver" => self.request_driver(&args).await,
@@ -365,8 +365,44 @@ impl Assistant {
     /// A question outside the house's frame (a joke, an explanation, an opinion).
     /// The tool stays in the contract (no retraining), but nothing leaves the house
     /// until handing a question to another assistant has a decided form (#17).
-    fn delegate() -> String {
-        moli_i18n::tr!("assistant.house.delegate_later")
+    /// Room for the house model's answer: one call or a few words, and the
+    /// texts its tools carry are bounded by `MAX_REQUEST`. Once an agent can
+    /// take a question, `delegate` writes it out again, whole: room for it
+    /// too, or a long one is cut mid-call and lost (the rule of `output_room`).
+    fn house_room(&self, question: &str) -> usize {
+        if self.0.hermes.is_some() {
+            HOUSE_WORDS + question.chars().count()
+        } else {
+            HOUSE_WORDS
+        }
+    }
+
+    /// `delegate`: a question beyond the house, handed to the outside agent
+    /// when there is one; its answer is announced when it comes. Once a turn,
+    /// as for the general model (`MAX_DELEGATIONS`): one answer here makes up
+    /// to `MAX_CALLS` calls, as many tasks otherwise.
+    async fn delegate_question(&self, args: &Json, run: &mut Run) -> String {
+        if self.0.hermes.is_none() {
+            return moli_i18n::tr!("assistant.house.delegate_later");
+        }
+        if run.delegations == crate::MAX_DELEGATIONS {
+            return moli_i18n::tr!("assistant.house.delegate_once");
+        }
+        run.delegations += 1;
+        let Some(question) = args["question"]
+            .as_str()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+        else {
+            return unknown_words();
+        };
+        match self.hand_over(question, false, &run.asker).await {
+            Ok(_) => moli_i18n::tr!("assistant.house.delegated"),
+            Err(why) => {
+                tracing::warn!(error = %why, "handing a question over");
+                moli_i18n::tr!("assistant.house.delegate_failed")
+            }
+        }
     }
 
     /// The rooms a sentence names (whole words, accents and case aside), as the house writes them.
@@ -659,7 +695,7 @@ impl Assistant {
         let proposal = self
             .0
             .proposals
-            .add(change, text.to_owned(), None, run.asker.clone());
+            .add(change, text.to_owned(), None, Some(run.asker.clone()));
         run.proposals.push(proposal);
         propose_words(text, spoken)
     }
@@ -742,7 +778,7 @@ impl Assistant {
     /// dialogue: Moli keeps what was done.
     fn propose_undo(&self, spoken: bool, run: &mut Run) -> String {
         // « Non, annule ! » right after a proposal means: not that one. Nothing was changed.
-        if let Some(waiting) = self.0.proposals.newest_pending(run.asker.as_deref()) {
+        if let Some(waiting) = self.0.proposals.newest_pending(Some(&run.asker)) {
             self.0.proposals.take(waiting);
             return moli_i18n::tr!("assistant.house.cancelled");
         }
@@ -762,7 +798,7 @@ impl Assistant {
             applied.inverse,
             text.clone(),
             Some(applied.id),
-            run.asker.clone(),
+            Some(run.asker.clone()),
         );
         run.proposals.push(proposal);
         propose_words(&text, spoken)
@@ -1346,6 +1382,8 @@ const PROPOSING: [&str; 7] = [
 const MAX_PERSON: usize = 40;
 /// Longest request for a driver, in characters.
 const MAX_REQUEST: usize = 500;
+/// What the house model may write in one step without carrying a question.
+const HOUSE_WORDS: usize = 200;
 /// The requests file stops growing past this many bytes.
 const MAX_REQUESTS_FILE: u64 = 1024 * 1024;
 
@@ -1662,6 +1700,36 @@ pub(crate) mod tests {
         .unwrap()
     }
 
+    #[tokio::test]
+    async fn with_an_agent_a_long_question_has_room_to_be_handed_over() {
+        let long = "trouve-moi une recette de rougail saucisse pour huit personnes ; ".repeat(12);
+        let (moli, asked) = house_model(vec![&words("D'accord.")]).await;
+        moli.turn(ask(&long)).await.unwrap();
+        assert_eq!(body_of(&asked.lock().unwrap()[0])["max_tokens"], 200);
+        let (url, asked) = fake_provider(vec![words("D'accord.")]).await;
+        // An agent at home, never asked here (the model answers in words).
+        let config: Config = toml::from_str(&format!(
+            "[[provider]]\nid = \"house\"\nbase_url = \"{url}\"\nmodel = \"moli-maison\"\ntier = 1\ncontract = \"moli-v4\"\n\n[routes]\nchat = \"house\"\n\n[hermes]\nurl = \"http://127.0.0.1:9\"\n"
+        ))
+        .unwrap();
+        let moli = Assistant::new(
+            crate::tests::hub_with_hermes_token("maison").await,
+            None,
+            None,
+            None,
+            config,
+        )
+        .unwrap();
+        moli.0
+            .warm_after_change
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        moli.turn(ask(&long)).await.unwrap();
+        assert_eq!(
+            body_of(&asked.lock().unwrap()[0])["max_tokens"],
+            json!(200 + long.chars().count())
+        );
+    }
+
     fn body_of(request: &str) -> Json {
         serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap()
     }
@@ -1743,6 +1811,58 @@ pub(crate) mod tests {
     async fn warming_up_a_house_model_that_does_not_answer_is_silent() {
         let (moli, _) = house_model(vec![]).await; // the provider answers 500
         moli.warm_up().await; // nothing to report, nothing to crash
+    }
+
+    /// Several `delegate` in one answer: one task handed over, the others
+    /// declined in words.
+    #[tokio::test]
+    async fn the_house_model_hands_over_once_a_turn() {
+        let started = |id: &str| json!({ "id": id, "status": "started" }).to_string();
+        let (agent, agent_asked) = fake_provider(vec![started("run-a"), started("run-b")]).await;
+        let (house, _) = fake_provider(vec![calls(&[
+            ("delegate", r#"{"question":"Un vol pour Paris ?"}"#),
+            ("delegate", r#"{"question":"Et un hôtel ?"}"#),
+        ])])
+        .await;
+        let config: Config = toml::from_str(&format!(
+            "[[provider]]
+id = \"house\"
+base_url = \"{house}\"
+model = \"moli-maison\"
+tier = 1
+contract = \"moli-v4\"
+
+[routes]
+chat = \"house\"
+
+[hermes]
+url = \"{agent}\"
+"
+        ))
+        .unwrap();
+        let moli = Assistant::new(
+            crate::tests::hub_with_hermes_token("une-fois").await,
+            None,
+            None,
+            None,
+            config,
+        )
+        .unwrap();
+        moli.0
+            .warm_after_change
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let reply = moli
+            .turn(ask("Trouve-moi un vol et un hôtel"))
+            .await
+            .unwrap();
+        assert_eq!(agent_asked.lock().unwrap().len(), 1);
+        assert!(
+            reply
+                .reply
+                .contains(&moli_i18n::tr!("assistant.house.delegate_once")),
+            "{}",
+            reply.reply
+        );
     }
 
     #[tokio::test]

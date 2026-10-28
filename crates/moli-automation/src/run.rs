@@ -637,6 +637,7 @@ async fn notify(
     let messengers = autos.messengers();
     if channels.contains(&Channel::Maison) || messengers.is_empty() {
         autos.0.hub.notice(Notice {
+            to: None,
             title: title.clone(),
             message: message.to_owned(),
             from: Some(a.name.clone()),

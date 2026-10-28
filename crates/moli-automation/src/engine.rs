@@ -330,6 +330,7 @@ fn runaway(autos: &Automations, a: &Automation) -> bool {
             }
             autos2.changed(&id);
             autos2.0.hub.notice(Notice {
+                to: None,
                 title: Some(tr!("moteur.notice.boucle_titre")),
                 message: tr!("moteur.notice.boucle", nom = name),
                 from: None,
