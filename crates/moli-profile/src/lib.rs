@@ -1604,6 +1604,21 @@ mod tests {
                 .unwrap()
         }
 
+        /// What it remembers once `identity` is written there. The device is
+        /// online before its address is written (`learn`, after `ready`): read
+        /// at once, the file may still hold the book from before, as it did
+        /// now and then on a busy machine.
+        async fn remembered_as(&self, identity: &str) -> serde_json::Value {
+            for _ in 0..300 {
+                let book = self.remembered();
+                if book["clim"]["identity"] == identity {
+                    return book;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            self.remembered()
+        }
+
         async fn stop(self) {
             self.cancel.cancel();
             self.task.await.unwrap();
@@ -1708,7 +1723,7 @@ mod tests {
         let house = House::new("edited", port, LOOPBACK, Some(before));
         assert!(house.online(OTHER).await, "what answers there is taken");
         assert!(house.moves().is_empty(), "nothing was looked for");
-        assert_eq!(house.remembered()["clim"]["identity"], OTHER);
+        assert_eq!(house.remembered_as(OTHER).await["clim"]["identity"], OTHER);
         house.stop().await;
     }
 
