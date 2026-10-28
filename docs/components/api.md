@@ -407,7 +407,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
   `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`,
-  `smoke`, `tamper`, `config`, `other`.
+  `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose ne va pas), `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
 

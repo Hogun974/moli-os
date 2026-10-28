@@ -736,6 +736,9 @@ fn compile_point(
     let semantic = p
         .semantic
         .unwrap_or_else(|| Semantic::infer(&p.key, unit.as_ref()));
+    if semantic == Semantic::Alert && kind != Kind::Binary {
+        return Err("semantic alert is a binary point (true: something is wrong)".into());
+    }
     Ok(CompiledPoint {
         spec: PointSpec {
             key: p.key.as_str().into(),
@@ -1194,6 +1197,21 @@ mod tests {
 
     fn try_compile(text: &str) -> Result<Compiled, ProfileError> {
         Profile::parse(text).and_then(|p| p.compile(Source::Builtin))
+    }
+
+    #[test]
+    fn an_alert_is_a_binary_point() {
+        let with = |kind: &str| {
+            format!(
+                "[profile]\nid = \"veille\"\nname = \"Veille\"\n\
+                 [[request]]\nid = \"s\"\npath = \"/etat\"\nformat = \"json\"\nevery = \"5m\"\n\
+                 [[point]]\nkey = \"en_alerte\"\nlabel = \"En alerte\"\nfrom = \"s.ko\"\nkind = \"{kind}\"\nsemantic = \"alert\"\n"
+            )
+        };
+        let compiled = try_compile(&with("binary")).unwrap();
+        assert_eq!(compiled.points[0].spec.semantic, Semantic::Alert);
+        let err = try_compile(&with("numeric")).unwrap_err();
+        assert!(err.message.contains("alert"), "{}", err.message);
     }
 
     #[test]

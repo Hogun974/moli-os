@@ -183,6 +183,10 @@ export const protectedRoom = (name) =>
     ),
   );
 
+/** A device the house watches: it has an `alert` point and says itself
+ *  whether it is well (the « Parc » page). */
+export const watches = (d) => (d?.points ?? []).some((p) => p.semantic === 'alert');
+
 export function hidden(id) {
   return (home.config?.hidden ?? []).includes(id);
 }

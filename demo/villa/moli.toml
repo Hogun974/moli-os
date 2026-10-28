@@ -85,6 +85,12 @@ kind = "demo"
 fixture = "devices/meteo.json"
 
 [[driver]]
+id = "parc"
+kind = "demo"
+[driver.options]
+fixture = "devices/parc.json"
+
+[[driver]]
 id = "piscine"
 kind = "demo"
 [driver.options]
