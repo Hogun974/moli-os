@@ -88,9 +88,16 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(humanError(res.status, body.error));
-    // Stopped: nothing to say. The question left unanswered goes, no empty bubble.
+    // Stopped: nothing to say. What the turn already did before the stop (a
+    // light switched, an order waiting for an adult) is shown, or nobody would
+    // know; with nothing done, the question left unanswered goes, no empty bubble.
     if (body.interrupted) {
-      moli.messages.pop();
+      if (body.actions?.length) {
+        moli.messages.push({ role: 'assistant', content: t('moli.fil.interrompu'), cards: [], actions: body.actions });
+        moli.focus = moli.messages.length - 1;
+      } else {
+        moli.messages.pop();
+      }
       return null;
     }
     moli.messages.push({

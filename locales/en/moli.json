@@ -59,6 +59,7 @@
   "moli.composer.parler_avec": "Talk with Moli",
   "moli.composer.arreter": "Stop",
   "moli.composer.arreter_reflexion": "Stop thinking",
+  "moli.fil.interrompu": "Stopped. Already done before the stop:",
   "moli.composer.dicter": "Speak",
   "moli.composer.arreter_ecoute": "Stop listening",
   "moli.composer.parler_a": "Speak to Moli",
