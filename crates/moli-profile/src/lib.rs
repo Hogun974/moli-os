@@ -478,8 +478,14 @@ impl SnapshotSource for Snapshots {
         Box::pin(async move {
             let bytes =
                 exchange(&self.target, &self.path, &[], &self.path, None, MAX_IMAGE).await?;
+            let Some(content_type) = image_type(&bytes) else {
+                bail!(
+                    "{}: the answer is not a PNG, JPEG, GIF or WebP image",
+                    self.path
+                );
+            };
             Ok(Image {
-                content_type: image_type(&bytes).to_owned(),
+                content_type: content_type.to_owned(),
                 bytes: bytes.to_vec(),
             })
         })
@@ -488,17 +494,19 @@ impl SnapshotSource for Snapshots {
 
 /// What the bytes are, read from them: a device often says `text/html` or
 /// nothing at all, and an image announced wrong simply does not show.
-fn image_type(bytes: &[u8]) -> &'static str {
+/// `None` when they are no image at all (an error page served with a 200):
+/// it must not reach a dashboard, nor an agent, labelled as a photo.
+fn image_type(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "image/png"
+        Some("image/png")
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        "image/jpeg"
-    } else if bytes.starts_with(b"GIF") {
-        "image/gif"
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF8") {
+        Some("image/gif")
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        "image/webp"
+        Some("image/webp")
     } else {
-        "image/jpeg"
+        None
     }
 }
 
@@ -1238,6 +1246,18 @@ fn publish(ctx: &DriverCtx, profile: &Compiled, device: &DeviceId, request: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_image_bytes_are_an_image() {
+        assert_eq!(image_type(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(
+            image_type(&[0x89, 0x50, 0x4E, 0x47, 0x0D]),
+            Some("image/png")
+        );
+        assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(image_type(b"<!DOCTYPE html><title>404</title>"), None);
+        assert_eq!(image_type(b""), None);
+    }
     use md5::{Digest as _, Md5};
     use moli_core::DriverStatus;
 

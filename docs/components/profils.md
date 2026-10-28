@@ -36,6 +36,7 @@ Quatre sections : `[profile]`, au moins une `[[request]]`, au moins un `[[point]
 | `mac` | non | `<requête>.<chemin>` de l'adresse MAC de l'appareil, pour le retrouver si son adresse change (voir « Une adresse qui change ») ; quand c'est aussi `identity`, l'appareil est retrouvable avant même d'avoir répondu une fois |
 | `name_from` | non | `<requête>.<chemin>` du nom que l'appareil se donne |
 | `secret` | non | nom du secret (par instance, dans le coffre chiffré) dont le profil a besoin. Un profil **fichier** qui en déclare un doit aussi déclarer `host` |
+| `snapshot` | non | chemin `GET` qui répond par **une image** (PNG, JPEG, GIF ou WebP, 8 Mio au plus) : l'appareil fournit alors des images à la demande, demandées seulement quand une surface en veut une, jamais interrogées en boucle. Même forme que `[[request]] path`, et une lecture : pas de query hors des points d'accès sûrs. Une réponse qui n'est pas une image est une erreur |
 
 ### `[[request]]`
 

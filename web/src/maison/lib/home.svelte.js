@@ -213,9 +213,10 @@ const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!w
 export function deviceKind(d) {
   if (!d) return 'unknown';
   if (has(d, 'progress') && has(d, 'nozzle_temperature')) return 'printer';
+  // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
+  if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
-  if (has(d, 'key', true)) return 'tv';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
   if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
     return 'cover';

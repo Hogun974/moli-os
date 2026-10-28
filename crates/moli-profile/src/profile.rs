@@ -342,7 +342,11 @@ impl Profile {
             return Err(fail("at least one [[request]] is required".into()));
         }
         if let Some(path) = &self.profile.snapshot {
-            check_shape(path).map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
+            // Asked outside the guard (a dashboard tile in a loop, the MCP
+            // `camera_snapshot` tool): a read, so it may change nothing.
+            check_shape(path)
+                .and_then(|()| check_read_query(path))
+                .map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
         }
         let secrets = Secrets {
             declared: self.profile.secret.is_some(),
@@ -1206,6 +1210,9 @@ snapshot = \"{path}\""
         };
         assert!(try_compile(&with("/apercu.jpg")).is_ok());
         let err = try_compile(&with("apercu.jpg")).unwrap_err();
+        assert!(err.message.contains("snapshot"), "{}", err.message);
+        // A GET with parameters can change the device: not as an image either.
+        let err = try_compile(&with("/relay/0?turn=on")).unwrap_err();
         assert!(err.message.contains("snapshot"), "{}", err.message);
     }
 
