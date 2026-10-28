@@ -133,6 +133,9 @@ pub struct Options {
     /// The sky over the house (forecast, satellite), when its position is
     /// known.
     pub weather: Option<moli_weather::Weather>,
+    /// The house's time zone (IANA), as resolved at start: shown in
+    /// `/api/system`.
+    pub timezone: Option<String>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -367,6 +370,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
+        .layer(Extension(system::HouseZone(options.timezone.clone())))
         .layer(Extension(rest::HomeFile(options.home_path.clone())))
         .layer(Extension(plan::PlanDir(
             options

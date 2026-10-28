@@ -259,6 +259,20 @@ async fn labels_via_rest() {
 }
 
 #[tokio::test]
+async fn the_system_map_names_the_house_time_zone() {
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        timezone: Some("Indian/Reunion".into()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let (status, body) = request(&addr, "GET", "/api/system", None).await;
+    assert_eq!(status, 200, "{body}");
+    let system: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(system["timezone"], "Indian/Reunion");
+}
+
+#[tokio::test]
 async fn foreign_host_is_rejected_everywhere() {
     let (addr, _hub) = server().await;
     for path in ["/api/devices", "/mcp", "/"] {

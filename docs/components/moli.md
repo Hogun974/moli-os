@@ -16,8 +16,9 @@ model = "gpt-4.1-mini"                 # la conversation
 builder_model = "gpt-4.1"              # dessiner des automatismes (rare, donc un modèle plus fort)
 transcribe_model = "gpt-4o-mini-transcribe"   # voix → texte ; "" = pas de voix
 # base_url = "https://api.openai.com/v1"      # http://… pour un modèle local (pas de clé exigée)
-# timezone = "Europe/Paris"
 ```
+
+L'heure que Moli connaît est celle de la maison : `[server] timezone`.
 
 Clé : `moli-os secrets set assistant api_key` (une clé déjà donnée à l'intégration
 `openai_conversation` de HA peut être reprise, toujours par tube). Elle ne part qu'en

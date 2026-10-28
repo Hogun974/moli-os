@@ -3,6 +3,7 @@
 mod backup;
 mod catalogue;
 mod config;
+mod timezone;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -318,16 +319,25 @@ fn demo_fresh(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
-    // Before anything opens the data directory.
-    demo_fresh(&config)?;
-    // The house's language: the one chosen at the installation, else the
-    // configuration's.
+/// The house's language (the one chosen at the installation, else the
+/// configuration's), then its time zone, said in that language: where it
+/// came from, and what should be written instead of guessed.
+fn speak_and_tell_the_time(config: &Config) {
     let language = moli_api::settings::language(&config.server.data_dir)
         .unwrap_or_else(|| config.server.language.clone());
     if !moli_i18n::set_language(&language) {
         tracing::warn!(%language, "unknown language: Moli speaks {}", moli_i18n::FALLBACK);
     }
+    tracing::info!(timezone = %config.zone.name, from = %config.zone.origin(), "the house's time zone");
+    for warning in config.zone.warnings() {
+        tracing::warn!("{warning}");
+    }
+}
+
+async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
+    // Before anything opens the data directory.
+    demo_fresh(&config)?;
+    speak_and_tell_the_time(&config);
     // The master key comes from the environment (a secrets manager), or a
     // new house's key file.
     let secrets = master_key(&config.server.data_dir, true)?
@@ -403,6 +413,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         phones: gates.phones,
         machines: gates.machines,
         weather: weather(&config),
+        timezone: Some(config.zone.name.clone()),
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(
@@ -505,6 +516,10 @@ fn check_config(config: &Config) -> anyhow::Result<()> {
     if let Some(assistant) = &config.assistant {
         assistant.check().context("[assistant]")?;
     }
+    println!("time zone: {} ({})", config.zone.name, config.zone.origin());
+    for warning in config.zone.warnings() {
+        println!("  ! {warning}");
+    }
     println!("configuration OK ({} driver(s))", config.drivers.len());
     Ok(())
 }
@@ -518,6 +533,8 @@ fn start_assistant(
     history: Option<&moli_history::History>,
 ) -> anyhow::Result<Option<moli_assistant::Assistant>> {
     let mut settings = config.assistant.clone().unwrap_or_default();
+    // Without [assistant], its defaults: but the house's clock, always.
+    settings.timezone.clone_from(&config.zone.name);
     // The forecast's location: the one the automations already know.
     if settings.latitude.zip(settings.longitude).is_none() {
         settings.latitude = config.automations.latitude;
