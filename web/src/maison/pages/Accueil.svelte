@@ -512,6 +512,32 @@
     font-weight: 650;
   }
 
+  /* Without the air-conditioning card the twelve-column grid no longer tiles:
+     a row is as tall as its tallest card (the energy side, the doorbell over
+     two rows) and leaves empty space under the short ones. On a wide screen
+     the cards then stack in columns, which leaves no hole whichever cards
+     the house has. */
+  @media (min-width: 1181px) {
+    .grid:not(:has(.climate)) {
+      display: block;
+      columns: 420px 3;
+      column-gap: 20px;
+    }
+
+    .grid:not(:has(.climate)) > * {
+      width: 100%;
+      margin: 0 0 20px;
+      break-inside: avoid;
+    }
+
+    /* Out of a grid, a card that is a link turns inline again and loses its
+       background. Block it, with no specificity, so a card that declares its
+       own display (the remote) keeps it. */
+    :where(.grid:not(:has(.climate))) > :where(a) {
+      display: block;
+    }
+  }
+
   @media (max-width: 1180px) {
     .lights,
     .climate {
