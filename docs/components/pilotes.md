@@ -310,7 +310,11 @@ host = "192.168.1.x"
 - **Points** : `playing` (lecture/pause), `volume` (0-100 %), `mute` **écrivables** ; `state`, `title`, `artist` en lecture (métadonnées DIDL échappées).
 - **Identité** : UDN UPnP. Nom et pièce natifs = `roomName` Sonos.
 - **Annonces vocales** (`[driver.options.announce]` : `media_base`, `tts`, `voice`, `volume`) :
-  un point `announce` (texte, écriture seule). Une annonce est une commande comme une autre
+  un point `announce` (texte, écriture seule), et `announce_volume` (0-100 %, **écrivable**) :
+  le niveau auquel une annonce est dite. Il part du `volume` de la configuration, puis garde la
+  dernière valeur écrite, redémarrage compris ; l'écrire passe par la garde comme le reste. Le
+  tableau de bord en fait le curseur « Pendant une annonce » de la carte de l'enceinte, montré
+  seulement si le point est inscriptible. Une annonce est une commande comme une autre
   (garde et journal ; un agent ne parle pas la nuit sans accord). Le texte (500 caractères au
   plus) est dit par **Piper en local** (protocole Wyoming, `moli-net::wyoming`), le son est
   publié 5 minutes sous un nom imprévisible (`GET /api/media/<128 bits>.wav`), puis joué en

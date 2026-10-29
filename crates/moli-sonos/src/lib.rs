@@ -1,8 +1,9 @@
 //! Sonos players, through their local UPnP API (HTTP 1400): play/pause,
 //! volume, mute, what is playing. Polled every two seconds. With
 //! `[driver.options.announce]`, spoken announcements too (`announce.rs`),
-//! and `quiet`: while on, no announcement is said (whoever asks), until it
-//! is switched off or [`QUIET_FOR`] has passed (a silence forgotten on).
+//! said at `announce_volume` (the configured `volume` to start with), and
+//! `quiet`: while on, no announcement is said (whoever asks), until it is
+//! switched off or [`QUIET_FOR`] has passed (a silence forgotten on).
 
 mod announce;
 
@@ -192,6 +193,19 @@ fn device(ctx: &DriverCtx, id: &DeviceId, room: &str, model: &str, speaks: bool)
             unit: None,
             semantic: Semantic::Other,
         });
+        device.points.push(point(
+            "announce_volume",
+            &moli_i18n::tr!("pilotes.sonos.volume_annonce"),
+            Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0),
+            },
+            true,
+            Some(Unit::Percent),
+            // A setting of the speaker, not its volume: « louder » is not about it.
+            Semantic::Other,
+        ));
         device.points.push(PointSpec {
             key: "announce".into(),
             label: moli_i18n::tr!("pilotes.sonos.annonce").into(),
@@ -345,6 +359,17 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         None => None,
     };
     ctx.upsert_device(device(ctx, &id, &room, &model, announcer.is_some()));
+    if let Some(announcer) = &announcer {
+        // A level written before survives a restart (the hub keeps it).
+        if let Some(level) = ctx
+            .current(&id, "announce_volume")
+            .as_ref()
+            .and_then(level_of)
+        {
+            announcer.set_level(level);
+        }
+        ctx.set_state(&id, "announce_volume", Value::Int(announcer.level().into()));
+    }
     ctx.ready();
     let mut tick = tokio::time::interval(POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -369,6 +394,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         speak(announcer.as_ref(), &command.value)
                     };
                     command.reply(result);
+                    continue;
+                }
+                if &*command.key == "announce_volume" {
+                    let result = announce_volume(announcer.as_ref(), &command.value);
+                    if let Ok(level) = result {
+                        ctx.set_state(&id, "announce_volume", Value::Int(level.into()));
+                    }
+                    command.reply(result.map(|_| ()));
                     continue;
                 }
                 if &*command.key == "quiet" {
@@ -420,6 +453,27 @@ fn set_quiet(ctx: &DriverCtx, id: &DeviceId, until: Option<u64>) {
     ctx.set_state(id, "quiet_until", Value::Int(until));
 }
 
+/// A level, 0–100, from what was written (a slider sends a number).
+fn level_of(value: &Value) -> Option<u8> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    value
+        .as_f64()
+        .filter(|v| v.is_finite())
+        .map(|v| v.round().clamp(0.0, 100.0) as u8)
+}
+
+/// The level the next announcements are said at.
+fn announce_volume(
+    announcer: Option<&Arc<announce::Announcer>>,
+    value: &Value,
+) -> Result<u8, String> {
+    let announcer =
+        announcer.ok_or_else(|| moli_i18n::tr!("pilotes.sonos.annonces_non_configurees"))?;
+    let level = level_of(value).ok_or_else(|| moli_i18n::tr!("pilotes.sonos.volume_nombre"))?;
+    announcer.set_level(level);
+    Ok(level)
+}
+
 /// Queues an announcement (it takes seconds: speech, then the clip) and
 /// answers at once; a failure later is told to the house.
 fn speak(announcer: Option<&Arc<announce::Announcer>>, value: &Value) -> Result<(), String> {
@@ -468,6 +522,16 @@ mod tests {
             tag("<CurrentVolume>23</CurrentVolume>", "CurrentVolume"),
             Some("23")
         );
+    }
+
+    #[test]
+    fn an_announcements_level_is_a_number_from_0_to_100() {
+        assert_eq!(level_of(&Value::Int(40)), Some(40));
+        assert_eq!(level_of(&Value::Float(37.6)), Some(38));
+        assert_eq!(level_of(&Value::Int(250)), Some(100));
+        assert_eq!(level_of(&Value::Int(-5)), Some(0));
+        assert_eq!(level_of(&Value::Float(f64::NAN)), None);
+        assert_eq!(level_of(&Value::Text("fort".into())), None);
     }
 
     #[test]

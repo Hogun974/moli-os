@@ -1,9 +1,10 @@
 <script>
-  import { value, act, num, nameOf } from '../lib/home.svelte.js';
+  import { value, act, num, nameOf, device } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
-  /** A speaker (Sonos…): what plays, play/pause, volume, mute. */
+  /** A speaker (Sonos…): what plays, play/pause, volume, mute, and the
+   *  level an announcement is said at when the speaker lets it be set. */
   let { id, name = null } = $props();
 
   const playing = $derived(value(id, 'playing') === true);
@@ -12,6 +13,12 @@
   const volume = $derived(value(id, 'volume'));
   const muted = $derived(value(id, 'mute') === true);
   let dragging = $state(null);
+  /** `announce_volume`, shown only where it can be written. */
+  const announces = $derived(
+    device(id)?.points.some((p) => p.key === 'announce_volume' && p.access?.write) ?? false,
+  );
+  const announceVolume = $derived(value(id, 'announce_volume'));
+  let draggingAnnounce = $state(null);
 </script>
 
 <section class="card sound">
@@ -49,6 +56,24 @@
       <Icon name={muted ? 'volume-off' : 'volume-high'} size={22} />
     </button>
   </div>
+  {#if announces}
+    <label class="announce">
+      <span>{t('salon.enceinte.volume_annonce')}</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="5"
+        value={draggingAnnounce ?? announceVolume ?? 0}
+        oninput={(e) => (draggingAnnounce = Number(e.currentTarget.value))}
+        onchange={(e) => {
+          const v = Number(e.currentTarget.value);
+          draggingAnnounce = null;
+          act(`${id}/announce_volume`, v, t('salon.enceinte.volume_annonce'));
+        }} />
+      <b class="num">{num(draggingAnnounce ?? announceVolume)}</b>
+    </label>
+  {/if}
 </section>
 
 <style>
@@ -102,6 +127,33 @@
   }
 
   .vol b {
+    width: 28px;
+    text-align: right;
+    color: var(--ink);
+  }
+
+  .announce {
+    display: grid;
+    grid-template-columns: minmax(0, 11ch) 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    color: var(--ink-3);
+    font-size: 0.9rem;
+  }
+
+  .announce span {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+
+  .announce input {
+    min-width: 0;
+    accent-color: var(--ink);
+    height: 24px;
+  }
+
+  .announce b {
     width: 28px;
     text-align: right;
     color: var(--ink);

@@ -39,7 +39,8 @@ pub struct Config {
     #[serde(default)]
     pub voice: Option<String>,
     /// Volume of the announcement, 0–100 (the speaker's own volume comes
-    /// back afterwards). Home Assistant's script used 35.
+    /// back afterwards). Home Assistant's script used 35. Where the
+    /// `announce_volume` point starts; once written, the point is kept.
     #[serde(default = "default_volume")]
     pub volume: u8,
 }
@@ -65,6 +66,8 @@ pub struct Announcer {
     turn: tokio::sync::Mutex<()>,
     /// Announcements waiting or playing.
     waiting: std::sync::atomic::AtomicUsize,
+    /// The level an announcement is said at (the `announce_volume` point).
+    level: std::sync::atomic::AtomicU8,
 }
 
 /// Announcements waiting at most: past it, a new one is refused (a burst
@@ -82,6 +85,7 @@ impl Announcer {
         pin: Option<String>,
         publisher: MediaPublisher,
     ) -> Arc<Self> {
+        let level = config.volume.min(100);
         Arc::new(Self {
             host: host.to_owned(),
             player: player.to_owned(),
@@ -90,7 +94,18 @@ impl Announcer {
             publisher,
             turn: tokio::sync::Mutex::new(()),
             waiting: std::sync::atomic::AtomicUsize::new(0),
+            level: std::sync::atomic::AtomicU8::new(level),
         })
+    }
+
+    /// The level the next announcements are said at, 0–100.
+    pub fn level(&self) -> u8 {
+        self.level.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_level(&self, level: u8) {
+        self.level
+            .store(level.min(100), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Queues `text` and answers at once: the announcement itself takes
@@ -213,7 +228,7 @@ impl Announcer {
                     "name": "Moli",
                     "appId": "local.moli.os",
                     "streamUrl": url,
-                    "volume": self.config.volume.min(100),
+                    "volume": self.level(),
                 }
             ]),
         )

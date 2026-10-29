@@ -34,6 +34,7 @@
   "salon.enceinte.arret": "Stopped",
   "salon.enceinte.son_tele": "TV sound",
   "salon.enceinte.rien": "Nothing playing",
+  "salon.enceinte.volume_annonce": "While announcing",
 
   "salon.tele.label": "Remote",
   "salon.tele.eteindre": "Turn the TV off",

@@ -99,6 +99,8 @@
   "pilotes.sonos.source": "Source du son",
   "pilotes.sonos.annonces_coupees": "Annonces coupées",
   "pilotes.sonos.annonces_coupees_jusqua": "Annonces coupées jusqu'à (ms)",
+  "pilotes.sonos.volume_annonce": "Volume des annonces",
+  "pilotes.sonos.volume_nombre": "le volume d'une annonce est un nombre de 0 à 100",
   "pilotes.sonos.annonce": "Annonce",
   "pilotes.sonos.ne_se_regle_pas": "{point} ne peut pas être réglé",
   "pilotes.sonos.annonces_non_configurees": "les annonces ne sont pas configurées",

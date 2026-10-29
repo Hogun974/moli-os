@@ -99,6 +99,8 @@
   "pilotes.sonos.source": "Sound source",
   "pilotes.sonos.annonces_coupees": "Announcements muted",
   "pilotes.sonos.annonces_coupees_jusqua": "Announcements muted until (ms)",
+  "pilotes.sonos.volume_annonce": "Announcement volume",
+  "pilotes.sonos.volume_nombre": "an announcement's volume is a number from 0 to 100",
   "pilotes.sonos.annonce": "Announcement",
   "pilotes.sonos.ne_se_regle_pas": "{point} cannot be set",
   "pilotes.sonos.annonces_non_configurees": "announcements are not configured",
