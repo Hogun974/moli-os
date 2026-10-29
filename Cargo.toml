@@ -13,6 +13,7 @@ rust-version = "1.88"
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
+moli-announce = { path = "crates/moli-announce" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }

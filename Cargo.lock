@@ -1099,6 +1099,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-announce"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "moli-api"
 version = "0.1.0"
 dependencies = [
@@ -1691,6 +1705,7 @@ name = "moli-sonos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "moli-announce",
  "moli-core",
  "moli-i18n",
  "moli-net",

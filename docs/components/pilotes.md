@@ -323,6 +323,10 @@ host = "192.168.1.x"
   `announce_sonos`. Le certificat du Sonos est épinglé au premier contact (secret
   `sonos/ws_cert`). Une annonce à la fois, dans l'ordre ; la commande répond tout de suite,
   un échec est journalisé dans les logs.
+  Tout ce qui n'est pas propre au Sonos (le texte vérifié, la file de 3 au plus, l'abandon
+  après 30 s d'attente, `quiet`, `announce_volume`, la synthèse et la publication du son) est
+  dans `crates/moli-announce`, pour toute enceinte qui parle ; le Sonos n'y ajoute que le clip
+  (`moli_announce::Speaker`).
 - **Pièges** : description injoignable au démarrage = échec du pilote, relancé par le superviseur. Pas de gestion des groupes Sonos.
 - **Tests** : lecture du SOAP et du DIDL doublement échappé.
 
