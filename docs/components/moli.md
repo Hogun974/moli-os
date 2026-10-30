@@ -365,7 +365,12 @@ Les règles, qui ne se règlent pas :
 - **Seule la demande sort** : ni la conversation, ni la mémoire, ni une image, ni l'état de la
   maison. Ce que l'agent répond est une information : rendue au modèle tronquée et marquée
   comme telle, et dès qu'elle a été lue, plus aucun outil qui agit sur la maison ou qui sort
-  (`web_search`) n'est offert ni exécuté dans ce tour, même si le modèle le nomme. Son statut
+  (`web_search`) n'est offert ni exécuté dans ce tour, même si le modèle le nomme. **Ni dans
+  les tours suivants qui la ramènent** : la conversation renvoie à chaque tour les réponses de
+  Moli, et une réponse écrite après avoir lu l'agent peut la porter, telle quelle ou redite.
+  Moli garde l'empreinte de ces réponses (24 h, 64 au plus, en mémoire : un redémarrage
+  l'oublie), et un tour dont la conversation en contient une, parmi les messages que lit le
+  modèle, n'agit pas non plus. Une conversation nouvelle agit de nouveau. Son statut
   n'arrive au modèle que comme un mot d'une liste fermée (`started`, `running`, `completed`,
   `failed`, `stopped`, sinon `unknown`), et l'identifiant de sa tâche est filtré et borné
   (64 caractères). Une seule tâche confiée par tour, pour le modèle maison aussi.
