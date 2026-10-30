@@ -22,6 +22,7 @@ moli-energy.workspace = true
 moli-tuya.workspace = true
 moli-reolink.workspace = true
 moli-sonos.workspace = true
+moli-airplay.workspace = true
 moli-bambu.workspace = true
 moli-esphome.workspace = true
 moli-alexa.workspace = true

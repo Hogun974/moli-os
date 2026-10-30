@@ -1058,6 +1058,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-airplay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-announce",
+ "moli-audio",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "moli-alexa"
 version = "0.1.0"
 dependencies = [
@@ -1512,6 +1530,7 @@ dependencies = [
  "clap",
  "http",
  "jiff",
+ "moli-airplay",
  "moli-alexa",
  "moli-api",
  "moli-assistant",

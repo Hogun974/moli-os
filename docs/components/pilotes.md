@@ -110,6 +110,7 @@ l'exige).
 | `public_tls()` | TLS vérifié contre les autorités publiques (liste Mozilla embarquée : l'image n'a pas de magasin système) |
 | `plain()` / `plain_with_headers()` | HTTP en clair, une connexion par requête (UPnP, API JSON locales), corps borné à 4 Mio |
 | `web(host, port, tls, req, limit, max_body)` + `WebUrl::parse` | une requête vers une API web, délai global et taille de réponse bornés ; `WebUrl` n'accepte que `http(s)://` et refuse `user@host`. Utilisé par l'assistant et les webhooks des automatismes. |
+| `raop` | AirPlay 1 vers un récepteur qui prend le PCM en clair : `plain` (le critère, lu dans le TXT `_raop._tcp`), `announced` (ce TXT, demandé au seul récepteur, celui de l'instance dont le SRV donne le port configuré), `Session` (RTSP, réponses appariées par `CSeq`, puis le son en RTP avec SYNC, avance bornée, renvois et horloge, en ne répondant qu'au récepteur), et trois gestes d'une session chacun, `read_volume`, `set_volume`, `say` (le volume relu, le niveau de l'annonce, le son, le volume remis). Un refus d'une étape de la session est une erreur typée (`Refused`), distincte d'un récepteur absent ; un `TEARDOWN` raté n'est qu'un avertissement. Voir [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay). |
 | `upnp` | `discover` (SSDP `M-SEARCH` vers 239.255.255.250:1900), `fetch` (description), `soap` (action), `control_url`, lecture XML minimale par nom de balise |
 
 En cas d'empreinte différente, l'erreur contient `PIN_MISMATCH` : les pilotes passent alors
@@ -326,9 +327,63 @@ host = "192.168.1.x"
   Tout ce qui n'est pas propre au Sonos (le texte vérifié, la file de 3 au plus, l'abandon
   après 30 s d'attente, `quiet`, `announce_volume`, la synthèse et la publication du son) est
   dans `crates/moli-announce`, pour toute enceinte qui parle ; le Sonos n'y ajoute que le clip
-  (`moli_announce::Speaker`).
+  (`moli_announce::Speaker`), comme [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay) le RAOP.
 - **Pièges** : description injoignable au démarrage = échec du pilote, relancé par le superviseur. Pas de gestion des groupes Sonos.
 - **Tests** : lecture du SOAP et du DIDL doublement échappé.
+
+## `airplay` : annonces sur un récepteur AirPlay 1 (`crates/moli-airplay`)
+
+- **Couvre** : un récepteur AirPlay 1 par instance, pour des **annonces** seulement (pas de
+  musique). Seulement un récepteur sans chiffrement, sans mot de passe ni appairage, lu dans son
+  TXT `_raop._tcp` (`moli_net::raop::plain`, la règle de pyatv) : `et` et `cn` contiennent 0,
+  pas de bit 38 ni 48 dans `ft` (AirPlay 2), ni `pw=true` ni `0x8`, `0x80` ou `0x200` dans
+  `sf` (mot de passe, appairage). Ni AirPlay 2 (HomePod, Apple TV récente, Mac : eux aussi ont
+  0 dans `et` et `cn`), ni AirPort Express.
+  IPv4 seulement.
+- **Protocole** : RAOP, dans `moli-net::raop`. RTSP sur **5000** (`ANNOUNCE` L16/44100/2,
+  `SETUP`, `RECORD`, `SET_PARAMETER`/`GET_PARAMETER volume`, `TEARDOWN`), puis du PCM 16 bits
+  stéréo **petit-boutiste** en RTP par paquets de 352 trames ; un **SYNC** chaque seconde sur
+  le port de contrôle du récepteur, qui avance jusqu'à la fin ; une avance sur sa latence
+  (2 s), bornée à 4× le temps réel ; les paquets réclamés (type 85) renvoyés ; ses questions
+  d'horloge répondues. Le son de Piper est rééchantillonné à 44,1 kHz (`moli-audio`).
+- **Configuration** : `host`, et `port` (5000 ; le recopier de l'enregistrement SRV
+  `_raop._tcp` quand il diffère), `tts` (`127.0.0.1:10200`), `voice`, `volume` (le niveau de
+  départ des annonces, 40).
+
+```toml
+[[driver]]
+id = "salon"
+kind = "airplay"
+[driver.options]
+host = "192.168.1.x"
+```
+
+- **Secrets** : aucun.
+- **Points** : ceux de `moli-announce`, comme pour le Sonos (`announce`, `announce_volume`,
+  `quiet`, `quiet_until`), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
+  relu dans la session de chaque annonce et remis après elle, même quand le son a échoué. 0 %
+  est muet (-144 dB). Un volume relu qui n'est pas un nombre fini (`nan`, `inf`) est ignoré ;
+  les autres sont bornés entre -144 et 0 dB. Un récepteur qui refuse le volume de l'annonce la
+  dit quand même, à son propre volume, avec un avertissement : rien n'est remis après. Des volumes écrits en rafale : seul le dernier en attente part.
+- **Pièges** : ⚠️ **toute session RTSP coupe ce que le récepteur joue**, même lire le volume :
+  `volume` est lu au démarrage et dans la session de chaque annonce, puis suivi d'après ce que
+  Moli écrit. Un réglage fait ailleurs (téléphone, télécommande) n'est vu qu'à l'annonce
+  suivante, et le libellé du point le dit. Au démarrage, le pilote demande au récepteur son TXT
+  (une question DNS-SD envoyée à son port 5353, pas à tout le réseau), celui de l'instance dont
+  le SRV donne `port` (un hôte peut en annoncer deux) : un récepteur qui ne
+  passe pas le critère, ou qui **refuse** la session, arrête le pilote avec une phrase qui dit
+  quoi faire. Un volume que le récepteur ne veut pas donner n'est pas un refus. La présence est
+  testée par une simple connexion TCP, qui ne coupe rien. Le récepteur ne dit **rien** quand il
+  jette ce qu'il reçoit (SYNC absent, retard, mauvais boutisme) : seule l'oreille prouve.
+- **Identité** : l'adresse `host`.
+- **Tests** : une session entière contre un faux récepteur (étapes RTSP, paquets, SYNC,
+  renvoi), le critère sur les TXT mesurés (Delta Player, HomePod, Apple TV, Mac), la lecture
+  d'une réponse DNS (coupée ou bouclée : rien ; deux instances : celle du port configuré ; le
+  TXT et le SRV en deux réponses), l'ordre des volumes d'une annonce, un volume refusé qui ne
+  coupe pas l'annonce, un volume relu `nan` ou hors bornes, les
+  réponses appariées par `CSeq`, le refus distingué de l'absence, le son tiré d'un WAV ; dans
+  un vrai `Hub`, le volume lu au démarrage puis écrit, une rafale de volumes, et le refus au
+  démarrage, par le TXT ou par la session.
 
 ## `philips` : télé Philips Android (`crates/moli-philips`)
 
@@ -617,6 +672,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
+| `airplay` | `moli-airplay` | RAOP : RTSP 5000, RTP/UDP | oui : annonces, volume | Freebox Delta Player |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |
 | `bambu` | `moli-bambu` | MQTT TLS 8883, épinglé | lumière, `control` (humain pour un agent) | pas encore (cible : Bambu Lab A1) |
